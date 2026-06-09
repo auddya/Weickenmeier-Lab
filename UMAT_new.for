@@ -16,13 +16,17 @@
       real(8) stress(ntens), statev(nstatv), ddsdde(ntens, ntens),
      1 ddsddt(ntens), drplde(ntens), stran(ntens), dstran(ntens),
      2 predef(1), dpred(1), props(nprops), coords(3), drot(3, 3),
-     3 dfgrd0(3, 3), dfgrd1(3, 3), time(2)
+     3 dfgrd0(3, 3), dfgrd1(3, 3), time(2), felastic(3,3), detfelastic
 !     
 !     Define arrays for axisymmetric and 3D dummy tangents
+      
       real(8) axi(6,6), k3d(4,4)
+      !   Define the number of material parameters and their symbolic notation
 
-      parameter(zero=0d0, one=1d0, two=2d0, three=3d0, four=4d0,
-     1          nine=9d0, half=5d-1, third=1d0/3d0, ninth=1d0/9d0)
+!
+!    Assign material coefficients
+!     #ac _ kprops: array with material property data
+!     #ac _ respect this order when you enter material properties in CAE
 
 
 !      write(*,*) 'Now, I am in UMAT.'
@@ -30,20 +34,30 @@
 
 !     #ac _ nshr: number of engineering shear stress components
 !      write(*,*) 'I am here.'
-      if (cmname.eq.'ZEROSTIFFNESS') then
-            call zero_stiffness(dfgrd1,nshr,ntens,stress,ddsdde,sse,statev,
-     1                  nstatv,kinc)
-      else
-            if (nshr.eq.1) then ! ###_ ac _ eq means =
-                  call la_sub(dfgrd1,nshr,props,stress,axi,DDSDDE,SSE,
-     1                  statev,nstatv,temp,time,dtime,rpl,drplde,drpldt)
-            else if (nshr.eq.3) then
-                  call la_sub(dfgrd1,nshr,props,stress,DDSDDE,k3d,SSE,
-     1                  statev,nstatv,temp,time,dtime,rpl,drplde,drpldt)
-            end if
+!      if (cmname.eq.'SM_VENTRICLE') then
+!            call zero_stiffness(dfgrd1,nshr,ntens,stress,ddsdde,sse,statev,
+!     1                  nstatv,kinc)
+!      else
+!            if (nshr.eq.1) then ! ###_ ac _ eq means =
+!                  call la_sub(dfgrd1,nshr,props,stress,axi,DDSDDE,SSE,
+!     1                  statev,nstatv,temp,time,dtime,rpl,drplde,drpldt)
+!            else if (nshr.eq.3) then
+!                  call la_sub(dfgrd1,nshr,props,stress,DDSDDE,k3d,SSE,
+!     1                  statev,nstatv,temp,time,dtime,rpl,drplde,drpldt)
+!            end if
+!      end if
+! call F_g_sub(statev, nstatv, dtime, gnot, J, F, Fg, Fginv, detFg, fe, detfe)
+      call F_g_sub(statev, nstatv, nshr, time, dtime, props, dfgrd1, 
+     1              felastic,detfelastic)
+      if (nshr.eq.1) then ! ###_ ac _ eq means =
+            call la_sub(felastic,detfelastic,nshr,props,stress,axi,
+     1                  DDSDDE,SSE,statev,nstatv,temp,time,dtime)
+      else if (nshr.eq.3) then
+            call la_sub(felastic,detfelastic,nshr,props,stress,
+     1                  DDSDDE,k3d,SSE,statev,nstatv,temp,time,dtime)
       end if
 
-
+! ,rpl,drplde,drpldt
       return
       end subroutine umat
 !
@@ -148,9 +162,67 @@
       end subroutine zero_stiffness
 
 !*********************************************************************
+
+c..   Implement atrophy model here 
+
+      subroutine F_g_sub(stv, nstv, knshr_test, time_test, udtime_test,  
+     1                  props_test, F_test, fe_test, detfe_test)
+     
+      implicit none
+     
+      integer nstv, knshr_test
+      real(8) stv(nstv), udtime_test, t, time_test(2)
+      real(8) props_test(14)
+      real(8) Fg_test(3,3), Fginv_test(3,3), fe_test(3,3), F_test(3,3)
+      real(8) F1_test(3,3)
+      real(8) thegn, theg, gnot_test, J_test, detFg_test, detfe_test
+      real(8) Jginf, kk, t0
+      integer i,j
+     
+      t = time_test(2)
+      
+      Jginf = props_test(11)
+      kk = props_test(12)
+      t0 = props_test(13)
+      
+      
+      !write(*,*) 'gnot', gnot_test
+      F1_test = F_test 
+      call bdet(F1_test, knshr_test, J_test)
+     
+      thegn = ((1.0d0 - Jginf) / (1.0d0 + dexp(-kk*(t-t0))))
+      theg = 1.0d0 - thegn
+      
+     
+c.. build isotropic growth tensor 
+
+      do i=1,3
+        do j=1,3
+          Fg_test(i,j) = 0.0d0
+        enddo
+      enddo
+    
+      Fg_test(1,1) = theg**(1.0d0/3.0d0)
+      Fg_test(2,2) = theg**(1.0d0/3.0d0)
+      Fg_test(3,3) = theg**(1.0d0/3.0d0)
+    
+      detFg_test = theg
+    
+      call invertmat33(Fg_test, detFg_test, Fginv_test)
+      fe_test      = matmul(F1_test,Fginv_test) ! #ac _ Fe(elastic tensor)=F*Fg^{-1}
+!
+      detfe_test   = J_test/detFg_test
+    
+c.. update state variable 
+
+      stv(1) = thegn
+    
+      return
+      end subroutine F_g_sub
+
 !***************************************************************************
     
-      subroutine la_sub(kdefg,knshr,kprops,CST,kEtens,axtens,kSSE,
+      subroutine la_sub(fel,detfel,knshr,kprops,CST,kEtens,axtens,kSSE,
      1                  sttv,nstv,tmptr,utime,udtime)
 !
 !    This program computes the stress (CST), tangent modulus (kEtens)
@@ -172,16 +244,17 @@
       implicit none
       real(8) J,tol1,kc,kd,PI,W,U,kSSE,utime(2),htsrc,htsrcde(6),
      1   mxGLx, mxGLy, mxGLz, maxpGL, minpGL, maxpCST, minpCST,udtime,
-     2   kprops(12),mu1,mu2,mu3,mu4,kl1,kl2,kl3,kl4,kappa,gc,gnot,
+     2   kprops(14),mu1,mu2,mu3,mu4,kl1,kl2,kl3,kl4,kappa,gc,gnot,
      3   nn(3),nn0(3),lamNN,lamTTmax,lamTT2,lamTTmin,lamNNCST,
      4   tt(3),tt0(3), tt1(3),tt2(3),temp,tmptr,theta,nrm,theg,thegn,
      5   lamTTmax_vec(3),lamTT2_vec(3),lamTTmin_vec(3),htsrcdt,
      6   ratiocrit,lnJe,detfe,detfg,lamTTCSTmax_vec(3),lamTTCST2_vec(3),
-     7   lamTTCSTmin,lamTTCSTmin_vec(3),lamTTCSTmax,lamTTCST2,lamTT
+     7   lamTTCSTmin,lamTTCSTmin_vec(3),lamTTCSTmax,lamTTCST2,lamTT,
+     9   detfel
       real(8), dimension(3) :: la2,la2bar,la,labar,dWdLa,B_a,
      1   laE, laE2, laCST
       real(8), dimension(3,3) :: kdefg,F,FT,b,na,Ga,Id,d2WLa2, C,
-     1   I2A, E, nE, nCST, CSTM,Finv,FinvT,fe, fg, Fginv,binv
+     1   I2A, E, nE, nCST, CSTM,Finv,FinvT,fe, fg, fginv,binv, fel
       real(8), dimension(6) :: bv,n11,n22,n33,Iden,kiso,VSC,CST,n12,
      1   n13,n23,htsrcdes
       real(8), dimension(6,6) :: Idy,Id4,a_vol,n11dy11,n22dy11,n33dy11,
@@ -212,11 +285,6 @@
       data xim/1,2,3,1,1,2/ ! #ac _ xim and xjm are used to convert normal
       data xjm/1,2,3,2,3,3/ ! #ac _ matrix notation to voigt notation
     
-!
-!    Assign material coefficients
-!     #ac _ kprops: array with material property data
-!     #ac _ respect this order when you enter material properties in CAE
-!
       mu1 = kprops(2)*two
       kl1 = kprops(3) 
       mu2 = kprops(4)*two
@@ -226,8 +294,12 @@
       mu4 = kprops(8)*two
       kl4 = kprops(9)
       kappa=kprops(10)  ! kappa=E/(3*(1-2v))
-      gnot = kprops(11)
-      ratiocrit=kprops(12)!kprops(12)
+      !gnot = kprops(11)
+      ratiocrit=kprops(14)!kprops(12)
+!    Assign material coefficients
+!     #ac _ kprops: array with material property data
+!     #ac _ respect this order when you enter material properties in CAE
+
 
 !      write(*,*) 'mu1:', mu1, 'kl1:', kl1, 'mu2:', mu2, 'kl2:', kl2
 !      write(*,*) 'mu3:', mu3, 'kl3:', kl3, 'mu4:', mu4, 'kl4:', kl4
@@ -238,35 +310,30 @@
 !!!!!!!!!!!!!!!!!!!!!!!!! END OF USER INPUT !!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
-!      write(*,*) 'And now, I am in la_sub.'
 !    Define tolerance for L’Hôpital’s rule
       tol1 = 1d-6
 !
 !    Calculate the determinant of deformation gradient: J(real)
-      F = kdefg
+!      F = kdefg
 !      write(*,*) 'F:', F
-      call bdet(F, knshr, J)
+!      call bdet(F, knshr, J)
 !      write(*,*) 'det:', J
-!      STOP
-!
-
-
-      call F_g_sub(sttv, nstv, udtime, gnot, J, F, Fg, Fginv, detFg, fe, detfe)
       
       !sttv(1) = thegn
     
-      write(*,*) 'This is la_sub and F_g_sub is done' 
+      !write(*,*) 'This is la_sub and F_g_sub is done' 
     
 
 !     #ac _  matI2 is a subroutine which is in utils.f file
       call matI2(I2A, 3) 
 !
 !    Calculate left Cauchy-Green deformation tensor: b(3,3)=F*(F^T)
-      F  = fe
-!      write(*,*) 'Fe:', F
-      FT = transpose(fe)
-      b  = matmul(fe,FT) ! matmul: performs a matrix multiplication
-      J  = detfe
+      F  = fel
+      FT = transpose(fel)
+      b  = matmul(F,FT) ! matmul: performs a matrix multiplication
+      J  = detfel
+      !write(*,*) 'J:', J
+      
 !
 !    Store b in Voigt notation, bv(6)
 !
@@ -281,6 +348,7 @@
 !     (Note: Jacobian algorithm destroys upper triangular components 12,13,23)
 !
       call DSYEVJ3(b,na,la2)
+      
 !
 !    Calculate the eigenvalues' square-root: la(3)
 !
@@ -300,6 +368,8 @@
       labar(1) = (la2bar(1)**half)
       labar(2) = (la2bar(2)**half)
       labar(3) = (la2bar(3)**half)
+      
+      
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!  USER INPUT  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -327,10 +397,14 @@
       W= W + (((mu4)/(kl4**two))* 
      1   ((labar(1)**(kl4))+(labar(2)**(kl4))+(labar(3)**(kl4))-three))
       end if
+      
+      
+!
 !
 !     Define the Volumetric energy, U
 !
       U = kappa/four*(J**two-one-two*dlog(J)) !#ac _ dlog = calculates the logarithm
+      
 !
 !     Combine the additive energy contributions to calculate the
 !      total strain energy density
@@ -394,6 +468,7 @@
 !    Calculate volumetric elasticity coefficient, kd=d^2U/dJ^2
 !
       kd = kappa/two*(one+one/(J**two))
+      
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!! END OF USER INPUT !!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -480,6 +555,7 @@
        CST(k1) = (one/J)*(kiso(k1) + VSC(k1))
       end do
 !
+      write(*,*) 'End of Cauchy stress'
 !
 !***********************************************************************
 !                   CALCULATE THE ELASTICITY MODULI
@@ -819,56 +895,13 @@
        end do
       end do
 !
+
+      write(*,*) 'End of tangent moduli'
       return 
       end subroutine la_sub
-      
-      
+
       
 !***********************************************************************
-
-
-      subroutine F_g_sub(stv, nstv, udtime_test, gnot_test, J_test, F_test, Fg_test, Fginv_test, detFg_test, fe_test, detfe_test)
-     
-      implicit none
-     
-      integer nstv
-      real(8) stv(nstv), udtime_test
-      real(8) Fg_test(3,3), Fginv_test(3,3), fe_test(3,3), F_test(3,3), detFg_test, detfe_test
-      real(8) thegn, theg, gnot_test, J_test
-      integer i,j
-     
-      write(*,*) 'This is F_g_sub'
-    
-     
-      thegn = stv(1) + gnot_test*udtime_test
-      theg = 1.0d0 - thegn
-     
-c.. build isotropic growth tensor 
-
-      do i=1,3
-        do j=1,3
-          Fg_test(i,j) = 0.0d0
-        enddo
-      enddo
-    
-      Fg_test(1,1) = theg
-      Fg_test(2,2) = theg
-      Fg_test(3,3) = theg
-    
-      detFg_test = theg*theg*theg
-    
-      call invertmat33(Fg_test, detFg_test, Fginv_test)
-      fe_test      = matmul(F_test,Fginv_test) ! #ac _ Fe(elastic tensor)=F*Fg^{-1}
-!
-      detfe_test   = J_test/detFg_test
-    
-c.. update state variable 
-
-      stv(1) = thegn
-    
-      return
-      end subroutine F_g_sub
-
 
 !***********************************************************************
       subroutine bdet(mat_A, nshr, DET)

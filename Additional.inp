@@ -1,0 +1,106 @@
+ ** PARAMETERS
+**
+*PARAMETER
+C10_CSF = 1.71E-05
+D1_CSF = 2.17E+03
+C10_VENT = 1.94E-05
+D1_VENT = 2.35E-04
+JINF_GM = 0.92
+K_GM = 2.21
+T0_GM = 2.30
+JINF_WM = 0.82
+K_WM = 2.41
+T0_WM = 2.1
+E_VENT = 1.01E-4
+NU_VENT = 0.30
+**
+** MATERIALS
+** 
+** ASSUMPTION IS BRAIN STEM HAS WM PROPERTIES
+**
+*Material, name=PM_BRAINSTEM2
+*User Material, type=mechanical, constants=14
+1.,0.00068,2.,0.,0.,0.,0.,0.,
+0.,0.0066,<JINF_WM>,<K_WM>,<T0_WM>,100
+*Depvar
+5,
+*Density
+1.1E-6
+**
+** ASSUMPTION IS CEREBELLUM HAS GM PROPERTIES
+**
+*Material, name=PM_CEREBELLUM
+** BRAIN INP FILE HERE -- GENERATED FROM SIMPLEWARE
+** Consult master branch - Insert this section below 
+** after the nodal definition of BrainFull3.inp
+**
+*User Material, type=mechanical, constants=14
+1.,0.00034,2.,0.,0.,0.,0.,0.,
+0.,0.0033,<JINF_GM>,<K_GM>,<T0_GM>,100
+*Depvar
+5,
+*Density
+1.1E-6
+**
+*Material, name=PM_CSF2
+*Hyperelastic, neo hooke
+ <C10_CSF>,<D1_CSF>
+*Density
+1.1E-6,
+**
+*Material, name=PM_GM
+*User Material, type=mechanical, constants=14
+1.,0.00034,2.,0.,0.,0.,0.,0.,
+0.,0.0033,<JINF_GM>,<K_GM>,<T0_GM>,100
+*Depvar
+5,
+*Density
+1.1E-6
+**
+*Material, name=PM_VENTRICLE
+*Hyperelastic, neo hooke
+ <C10_VENT>,<D1_VENT>
+*Density
+1.1E-6,
+**
+*Material, name=PM_WM
+*User Material, type=mechanical, constants=14
+1.,0.00068,2.,0.,0.,0.,0.,0.,
+0.,0.0066,<JINF_WM>,<K_WM>,<T0_WM>,100
+*Depvar
+5,
+*Density
+1.1E-6
+**
+*Material, name=SM_VENTRICLE
+*Elastic
+<E_VENT>,<NU_VENT>
+*Depvar
+5,
+*Density
+ 1.1E-6
+**
+**
+** STEP: Step-1
+**
+*Step, name=Step-1, nlgeom=YES
+*Static
+0.05, 5., 1e-5, 0.05
+**
+** BOUNDARY CONDITIONS
+** Name: Disp-BC-1 Type: Symmetry/Antisymmetry/Encastre
+*Boundary
+PART-1-1_outer-boundary, PINNED
+**
+** OUTPUT REQUESTS
+*Restart, write, frequency=0
+**
+** FIELD OUTPUT: F-Output-1
+*Output, field
+*Node Output
+U
+*Element Output, direction=YES
+E, SDV
+**
+*End Step
+
